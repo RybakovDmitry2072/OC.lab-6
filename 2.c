@@ -7,37 +7,49 @@
 #define MICRO_TO_MILLI 1000
 #define MILLIS_PER_SECOND 1000
 
-typedef struct {
-    long total_milliseconds;
-} Timestamp;
+static long global_start_time = 0;
 
-static void show_process_info(int process_id) {
+static void init_start_time() {
+    if (global_start_time == 0) {
+        struct timeval time_val;
+        gettimeofday(&time_val, NULL);
+        global_start_time = time_val.tv_sec * MILLIS_PER_SECOND +
+                           time_val.tv_usec / MICRO_TO_MILLI;
+    }
+}
+
+static void show_process_info(int process_id, int child_order) {
     struct timeval time_val;
-
     gettimeofday(&time_val, NULL);
 
-    Timestamp ts = {
-        .total_milliseconds = time_val.tv_sec * MILLIS_PER_SECOND +
-                             time_val.tv_usec / MICRO_TO_MILLI
-    };
+    long current_time = time_val.tv_sec * MILLIS_PER_SECOND +
+                       time_val.tv_usec / MICRO_TO_MILLI;
 
-    printf("Процесс=%d PID=%d PPID=%d Время=%ld\n",
-           process_id, getpid(), getppid(), ts.total_milliseconds);
+    long elapsed_time = current_time - global_start_time;
+
+    if (child_order > 0) {
+        printf("Процесс=%d PID=%d PPID=%d Время=%ld Дочерний №%d\n",
+               process_id, getpid(), getppid(), elapsed_time, child_order);
+   } else {
+        printf("Процесс=%d PID=%d PPID=%d Время=%ld (корневой)\n",
+               process_id, getpid(), getppid(), elapsed_time);
+    }
 
     fflush(stdout);
 }
 
-static void continuous_execution(int id_num) {
+static void continuous_execution(int id_num, int child_order) {
     int delay_ms = id_num * 200;
 
     while (1) {
-        show_process_info(id_num);
+        show_process_info(id_num, child_order);
         usleep(delay_ms * MICRO_TO_MILLI);
     }
 }
 
 static void generate_process_tree(int current_level, int max_levels,
-                                 int child_count, int node_index) {
+                                 int child_count, int node_index,
+                                 int parent_child_order) {
     if (current_level >= max_levels) {
         return;
     }
@@ -47,14 +59,14 @@ static void generate_process_tree(int current_level, int max_levels,
 
         if (child_pid < 0) {
             perror("Ошибка при первом вызове fork()");
-            exit(EXIT_FAILURE);
+           exit(EXIT_FAILURE);
         }
 
         if (child_pid == 0) {
             int new_id = (node_index - 1) * child_count + child_num + 1;
             generate_process_tree(current_level + 1, max_levels,
-                                 child_count, new_id);
-            continuous_execution(new_id);
+                                 child_count, new_id, child_num);
+            continuous_execution(new_id, child_num);
         }
     }
 }
@@ -64,7 +76,6 @@ int main(int parameter_count, char *parameter_values[]) {
         fprintf(stderr, "Использование: %s <уровни> <потомки>\n", parameter_values[0]);
         return EXIT_FAILURE;
     }
-
     int tree_levels = atoi(parameter_values[1]);
     int offspring_count = atoi(parameter_values[2]);
 
@@ -73,8 +84,10 @@ int main(int parameter_count, char *parameter_values[]) {
         return EXIT_FAILURE;
     }
 
-    generate_process_tree(0, tree_levels, offspring_count, 1);
-    continuous_execution(1);
+    init_start_time();
 
+    generate_process_tree(0, tree_levels, offspring_count, 1, 0);
+
+    continuous_execution(1, 0);
     return 0;
 }
